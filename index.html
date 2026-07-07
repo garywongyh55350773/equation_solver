@@ -1,1 +1,835 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Cosmic Equation Balancer</title>
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- React & ReactDOM CDNs -->
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+  <!-- Babel CDN for compiling JSX in browser -->
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <!-- Lucide Icons CDN -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <style>
+    @keyframes chiikawa-squash {
+      0%, 100% { transform: scale(1, 1) translateY(0); }
+      30% { transform: scale(1.15, 0.82) translateY(8px); }
+      50% { transform: scale(0.85, 1.15) translateY(-32px); }
+      70% { transform: scale(1.05, 0.95) translateY(0); }
+    }
+    @keyframes hachiware-dance {
+      0%, 100% { transform: scale(1, 1) translateY(0) rotate(0deg); }
+      25% { transform: scale(1.1, 0.9) translateY(4px) rotate(-8deg); }
+      50% { transform: scale(0.9, 1.1) translateY(-25px) rotate(8deg); }
+      75% { transform: scale(1.05, 0.95) translateY(0) rotate(-4deg); }
+    }
+    @keyframes usagi-crazy {
+      0%, 100% { transform: translate(0, 0) scale(1) rotate(0); }
+      20% { transform: translate(-10px, -15px) scale(1.08) rotate(-12deg); }
+      40% { transform: translate(10px, -30px) scale(0.92) rotate(16deg); }
+      60% { transform: translate(-5px, 8px) scale(1.06) rotate(-8deg); }
+      80% { transform: translate(8px, -20px) scale(0.96) rotate(12deg); }
+    }
+    .anim-chiikawa { animation: chiikawa-squash 0.8s infinite ease-in-out; }
+    .anim-hachiware { animation: hachiware-dance 0.9s infinite ease-in-out; }
+    .anim-usagi { animation: usagi-crazy 0.65s infinite ease-in-out; }
+  </style>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen">
 
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect } = React;
+
+    // Helper for rendering Lucide Icons in static CDN
+    const Icon = ({ name, className = "h-5 w-5" }) => {
+      useEffect(() => {
+        if (window.lucide) {
+          window.lucide.createIcons();
+        }
+      }, [name]);
+      return <i data-lucide={name} className={className}></i>;
+    };
+
+    const BACKEND_URL = "https://script.google.com/macros/s/AKfycby-QrzzM5uCKx2iWf5kjtur5JavmupHi57Q8o86Uwq9yNgfeKah5IjIrMtzc2fvbGnw/exec"; 
+
+    const PRESETS = [
+      { id: '1', name: 'Level 1: Basic Rescue', lhs: [{ coeff: 1, isVar: true }, { coeff: -1, isVar: false }], rhs: [{ coeff: 2, isVar: false }], description: 'Clear the upward lift to isolate the variable.' },
+      { id: '2', name: 'Level 2: Balanced Thrusters', lhs: [{ coeff: -2, isVar: true }, { coeff: -1, isVar: false }], rhs: [{ coeff: -5, isVar: false }], description: 'Isolate the reverse-thrust variables on the Left Wing.' },
+      { id: '3', name: 'Level 3: Dual Sector Alignment', lhs: [{ coeff: 2, isVar: true }, { coeff: 1, isVar: false }], rhs: [{ coeff: 5, isVar: false }], description: 'Balance the cargo weights before separating the components.' },
+      { id: '4', name: 'Level 4: Crossfire Orbits', lhs: [{ coeff: 2, isVar: true }, { coeff: -1, isVar: false }], rhs: [{ coeff: 1, isVar: true }, { coeff: 1, isVar: false }], description: 'Variables detected on both wings! Bring them to one side.' },
+      { id: '5', name: 'Level 5: Cosmic Storm (Fraction Sector)', lhs: [{ coeff: 0.5, isVar: true }, { coeff: -1, isVar: false }], rhs: [{ coeff: 1, isVar: false }], description: 'Fractions detected! Resolve x/2 - 1 = 1 to stabilize the jump drive.' }
+    ];
+
+    const getFractionStr = (val, isVar) => {
+      if (val === 0) return "0";
+      const sign = val < 0 ? "-" : "";
+      const absVal = Math.abs(val);
+      if (Math.abs(absVal - Math.round(absVal)) < 0.01) {
+        const intVal = Math.round(absVal);
+        if (isVar) return intVal === 1 ? `${sign}x` : `${sign}${intVal}x`;
+        return `${sign}${intVal}`;
+      }
+      for (let den = 2; den <= 20; den++) {
+        const num = Math.round(absVal * den);
+        if (Math.abs(absVal - (num / den)) < 0.01) {
+          if (isVar) {
+            const numStr = num === 1 ? 'x' : `${num}x`;
+            return `${sign}${numStr}/${den}`;
+          }
+          return `${sign}${num}/${den}`;
+        }
+      }
+      const rounded = Math.round(absVal * 100) / 100;
+      return isVar ? `${sign}${rounded}x` : `${sign}${rounded}`;
+    };
+
+    const parseTerm = (str) => {
+      str = str.trim().toLowerCase().replace(/\s+/g, '');
+      if (!str) return null;
+      const match = str.match(/^([+-]?\d*(?:\.\d+)?)(x?)$/);
+      if (!match) return null;
+      const coeffStr = match[1];
+      const isVar = match[2] === 'x';
+      let coeff = 1;
+      if (coeffStr === '+' || coeffStr === '') coeff = 1;
+      else if (coeffStr === '-') coeff = -1;
+      else coeff = parseFloat(coeffStr);
+      if (isNaN(coeff)) return null;
+      return { coeff, isVar };
+    };
+
+    function App() {
+      const [studentClass, setStudentClass] = useState('');
+      const [studentClassNo, setStudentClassNo] = useState('');
+      const [isRegistered, setIsRegistered] = useState(false);
+      const [currentPreset, setCurrentPreset] = useState(PRESETS[0]);
+      const [lhsTerms, setLhsTerms] = useState([]);
+      const [rhsTerms, setRhsTerms] = useState([]);
+      const [lhsModifier, setLhsModifier] = useState({ multiplier: 1, divisor: 1 });
+      const [rhsModifier, setRhsModifier] = useState({ multiplier: 1, divisor: 1 });
+      const [pendingOp, setPendingOp] = useState(null); 
+      const [showUnbalanceWarning, setShowUnbalanceWarning] = useState(false);
+      const [lhsCtrl, setLhsCtrl] = useState({ op: null, val: '' });
+      const [rhsCtrl, setRhsCtrl] = useState({ op: null, val: '' });
+      const [isSolved, setIsSolved] = useState(false);
+      const [isSimplifying, setIsSimplifying] = useState(false);
+      const [history, setHistory] = useState([]);
+      const [errorMessage, setErrorMessage] = useState('');
+      const [showHelpModal, setShowHelpModal] = useState(false);
+      const [showCustomCreator, setShowCustomCreator] = useState(false);
+      const [customLhsInput, setCustomLhsInput] = useState('2x + 1');
+      const [customRhsInput, setCustomRhsInput] = useState('3');
+      const [mistakesMade, setMistakesMade] = useState([]);
+
+      useEffect(() => {
+        if (isRegistered) {
+          loadEquation(currentPreset);
+        }
+      }, [currentPreset, isRegistered]);
+
+      const loadEquation = (preset) => {
+        setLhsTerms(JSON.parse(JSON.stringify(preset.lhs)));
+        setRhsTerms(JSON.parse(JSON.stringify(preset.rhs)));
+        setLhsModifier({ multiplier: 1, divisor: 1 });
+        setRhsModifier({ multiplier: 1, divisor: 1 });
+        setPendingOp(null);
+        setShowUnbalanceWarning(false);
+        setLhsCtrl({ op: null, val: '' });
+        setRhsCtrl({ op: null, val: '' });
+        setIsSolved(false);
+        setErrorMessage('');
+        setMistakesMade([]);
+        const eqString = formatEquationString(preset.lhs, { multiplier: 1, divisor: 1 }, preset.rhs, { multiplier: 1, divisor: 1 });
+        setHistory([{ description: 'Initialize System Coordinates', equation: eqString }]);
+      };
+
+      const handleReset = () => loadEquation(currentPreset);
+
+      const submitDataToBackend = async (levelName, finalEq, mistakes) => {
+        if (!studentClass || !studentClassNo) return;
+        const payload = new URLSearchParams();
+        payload.append('studentClass', studentClass);
+        payload.append('studentClassNo', studentClassNo);
+        payload.append('questionSubmitted', levelName);
+        payload.append('mistakesMade', JSON.stringify(mistakes));
+        payload.append('finalEquation', finalEq);
+
+        let retries = 5, delay = 1000;
+        while (retries > 0) {
+          try {
+            await fetch(BACKEND_URL, {
+              method: 'POST',
+              mode: 'no-cors',
+              headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+              body: payload
+            });
+            break;
+          } catch (err) {
+            retries--;
+            if (retries > 0) {
+              await new Promise(resolve => setTimeout(resolve, delay));
+              delay *= 2;
+            }
+          }
+        }
+      };
+
+      const handleKeypad = (side, char) => {
+        setErrorMessage('');
+        const setCtrl = side === 'LHS' ? setLhsCtrl : setRhsCtrl;
+        const ctrl = side === 'LHS' ? lhsCtrl : rhsCtrl;
+        if (char === 'Clear') setCtrl({ ...ctrl, val: '' });
+        else if (char === 'x') {
+          if (!ctrl.val.includes('x') && ctrl.op !== '*' && ctrl.op !== '/') {
+            setCtrl({ ...ctrl, val: ctrl.val + 'x' });
+          }
+        } else if (char === '-') {
+          if (ctrl.val === '') setCtrl({ ...ctrl, val: '-' });
+        } else setCtrl({ ...ctrl, val: ctrl.val + char });
+      };
+
+      const handleApply = (side) => {
+        setErrorMessage('');
+        const ctrl = side === 'LHS' ? lhsCtrl : rhsCtrl;
+        const setCtrl = side === 'LHS' ? setLhsCtrl : setRhsCtrl;
+        if (ctrl.val.trim() === '' || ctrl.val === '-' || ctrl.val === '+') {
+          setErrorMessage('Please enter a valid amount (e.g. 3 or 2x)');
+          return;
+        }
+        const op = ctrl.op;
+        const rawVal = ctrl.val;
+
+        if (pendingOp) {
+          if (side === pendingOp.side || op !== pendingOp.op || rawVal !== pendingOp.value) {
+            let mistakeDesc = side === pendingOp.side 
+              ? `Attempted to apply second operation (${op} ${rawVal}) on same wing before balancing (${pendingOp.op} ${pendingOp.value})`
+              : `Attempted to apply mismatched operation (${op} ${rawVal}) to ${side} while expecting (${pendingOp.op} ${pendingOp.value})`;
+            setMistakesMade(prev => [...prev, mistakeDesc]);
+            setShowUnbalanceWarning(true);
+            return;
+          }
+          applyOperationToState(side, op, rawVal);
+          const newLhs = side === 'LHS' ? applyOpToArray(lhsTerms, op, rawVal) : lhsTerms;
+          const newRhs = side === 'RHS' ? applyOpToArray(rhsTerms, op, rawVal) : rhsTerms;
+          let tempLhsMod = { ...lhsModifier }, tempRhsMod = { ...rhsModifier };
+          if (op === '*') {
+            if (side === 'LHS') tempLhsMod.multiplier *= parseFloat(rawVal);
+            else tempRhsMod.multiplier *= parseFloat(rawVal);
+          } else if (op === '/') {
+            if (side === 'LHS') tempLhsMod.divisor *= parseFloat(rawVal);
+            else tempRhsMod.divisor *= parseFloat(rawVal);
+          }
+          const eqString = formatEquationString(side === 'LHS' ? newLhs : lhsTerms, tempLhsMod, side === 'RHS' ? newRhs : rhsTerms, tempRhsMod);
+          setHistory(prev => [...prev, { description: `Balance both sides: ${op} ${rawVal}`, equation: eqString }]);
+          setPendingOp(null);
+          setCtrl({ op: null, val: '' });
+          setShowUnbalanceWarning(false);
+          return;
+        }
+
+        const success = applyOperationToState(side, op, rawVal);
+        if (success) {
+          setPendingOp({ side, op, value: rawVal });
+          setShowUnbalanceWarning(false);
+          setCtrl({ op: null, val: '' });
+        }
+      };
+
+      const applyOperationToState = (side, op, valueStr) => {
+        if (op === '+' || op === '-') {
+          const parsed = parseTerm(valueStr);
+          if (!parsed) {
+            setErrorMessage('Invalid format. Use numbers or x-terms.');
+            return false;
+          }
+          const finalCoeff = op === '-' ? -parsed.coeff : parsed.coeff;
+          const newTerm = { coeff: finalCoeff, isVar: parsed.isVar, isNew: true };
+          if (side === 'LHS') setLhsTerms(prev => [...prev, newTerm]);
+          else setRhsTerms(prev => [...prev, newTerm]);
+          return true;
+        } else if (op === '*') {
+          const factor = parseFloat(valueStr);
+          if (isNaN(factor) || factor === 0) return false;
+          if (side === 'LHS') setLhsModifier(prev => ({ ...prev, multiplier: prev.multiplier * factor }));
+          else setRhsModifier(prev => ({ ...prev, multiplier: prev.multiplier * factor }));
+          return true;
+        } else if (op === '/') {
+          const divisor = parseFloat(valueStr);
+          if (isNaN(divisor) || divisor === 0) return false;
+          if (side === 'LHS') setLhsModifier(prev => ({ ...prev, divisor: prev.divisor * divisor }));
+          else setRhsModifier(prev => ({ ...prev, divisor: prev.divisor * divisor }));
+          return true;
+        }
+        return false;
+      };
+
+      const applyOpToArray = (termsArray, op, valueStr) => {
+        if (op === '+' || op === '-') {
+          const parsed = parseTerm(valueStr);
+          if (!parsed) return termsArray;
+          return [...termsArray, { coeff: op === '-' ? -parsed.coeff : parsed.coeff, isVar: parsed.isVar }];
+        }
+        return termsArray;
+      };
+
+      const handleSimplify = () => {
+        if (pendingOp) return; 
+        setIsSimplifying(true);
+        setTimeout(() => {
+          const simplifiedLhs = simplifyWing(lhsTerms, lhsModifier);
+          const simplifiedRhs = simplifyWing(rhsTerms, rhsModifier);
+          setLhsTerms(simplifiedLhs);
+          setRhsTerms(simplifiedRhs);
+          setLhsModifier({ multiplier: 1, divisor: 1 });
+          setRhsModifier({ multiplier: 1, divisor: 1 });
+          const eqString = formatEquationString(simplifiedLhs, { multiplier: 1, divisor: 1 }, simplifiedRhs, { multiplier: 1, divisor: 1 });
+          setHistory(prev => [...prev, { description: 'Simplify terms and stabilize thrusters', equation: eqString }]);
+          setIsSimplifying(false);
+          checkSolvedState(simplifiedLhs, simplifiedRhs);
+        }, 800);
+      };
+
+      const simplifyWing = (terms, modifier) => {
+        const factor = modifier.multiplier / modifier.divisor;
+        let totalVar = 0, totalConst = 0;
+        terms.forEach(t => {
+          const adj = t.coeff * factor;
+          if (t.isVar) totalVar += adj; else totalConst += adj;
+        });
+        const res = [];
+        if (totalVar !== 0) res.push({ coeff: Math.round(totalVar * 100) / 100, isVar: true, isNew: false });
+        if (totalConst !== 0 || res.length === 0) res.push({ coeff: Math.round(totalConst * 100) / 100, isVar: false, isNew: false });
+        return res;
+      };
+
+      const checkSolvedState = (lhs, rhs) => {
+        const lhsX = lhs.length === 1 && lhs[0].isVar && lhs[0].coeff === 1;
+        const rhsC = rhs.length === 1 && !rhs[0].isVar;
+        const rhsX = rhs.length === 1 && rhs[0].isVar && rhs[0].coeff === 1;
+        const lhsC = lhs.length === 1 && !lhs[0].isVar;
+        if ((lhsX && rhsC) || (rhsX && lhsC)) {
+          const finalEq = formatEquationString(lhs, { multiplier: 1, divisor: 1 }, rhs, { multiplier: 1, divisor: 1 });
+          setIsSolved(true);
+          submitDataToBackend(currentPreset.name, finalEq, mistakesMade);
+        }
+      };
+
+      const formatWingString = (terms, modifier) => {
+        if (terms.length === 0) return '0';
+        let parts = [];
+        const factor = modifier.multiplier / modifier.divisor;
+        terms.forEach((t, idx) => {
+          const isFirst = idx === 0;
+          const effective = t.coeff * factor;
+          if (effective === 0) return;
+          const str = getFractionStr(effective, t.isVar);
+          const isNeg = str.startsWith("-");
+          const cleanStr = isNeg ? str.substring(1) : str;
+          const sign = isNeg ? (isFirst ? '-' : ' - ') : (isFirst ? '' : ' + ');
+          parts.push(`${sign}${cleanStr}`);
+        });
+        return parts.join('');
+      };
+
+      const formatEquationString = (lhs, lhsMod, rhs, rhsMod) => {
+        return `${formatWingString(lhs, lhsMod)} ${pendingOp ? '≠' : '='} ${formatWingString(rhs, rhsMod)}`;
+      };
+
+      const computePlacements = (terms, isLHS, modifier) => {
+        const engines = [];
+        const cxVar = isLHS ? 320 : 480;
+        const cxConst = isLHS ? 250 : 550;
+        const yTop = 194, yBot = 206;
+        let pVar = 0, nVar = 0, pConst = 0, nConst = 0;
+        const factor = modifier.multiplier / modifier.divisor;
+
+        terms.forEach((t, tIdx) => {
+          const val = t.coeff * factor;
+          let abs = Math.abs(val);
+          const parts = [];
+          while (abs >= 0.99) { parts.push(1.0); abs -= 1; }
+          if (abs > 0.01) parts.push(Math.round(abs * 100) / 100);
+
+          parts.forEach((pSize, pIdx) => {
+            const cx = t.isVar ? cxVar : cxConst;
+            const h = Math.max(14, 36 * pSize);
+            let cy;
+            if (val > 0) {
+              const off = t.isVar ? pVar : pConst;
+              cy = yTop - (h / 2) - off - 2;
+              if (t.isVar) pVar += h + 6; else pConst += h + 6;
+            } else {
+              const off = t.isVar ? nVar : nConst;
+              cy = yBot + (h / 2) + off + 2;
+              if (t.isVar) nVar += h + 6; else nConst += h + 6;
+            }
+            engines.push({ id: `${isLHS ? 'l' : 'r'}-${tIdx}-${pIdx}`, cx, cy, h, isVar: t.isVar, isPositive: val > 0, isFractional: pSize < 0.99, partSize: pSize });
+          });
+        });
+        return engines;
+      };
+
+      const lhsEngines = computePlacements(lhsTerms, true, lhsModifier);
+      const rhsEngines = computePlacements(rhsTerms, false, rhsModifier);
+      const lhsForce = getNetForce(lhsTerms, lhsModifier);
+      const rhsForce = getNetForce(rhsTerms, rhsModifier);
+
+      let tiltAngle = 0;
+      if (pendingOp) {
+        const diff = lhsForce - rhsForce;
+        tiltAngle = Math.max(-30, Math.min(30, diff * 12));
+        if (diff > 0 && tiltAngle < 10) tiltAngle = 10;
+        if (diff < 0 && tiltAngle > -10) tiltAngle = -10;
+      }
+
+      function getNetForce(terms, mod) {
+        let f = 0;
+        terms.forEach(t => { f += t.coeff * (mod.multiplier / mod.divisor); });
+        return f;
+      }
+
+      const handleRegisterSubmit = (e) => {
+        e.preventDefault();
+        if (studentClass.trim() && studentClassNo.trim()) {
+          setIsRegistered(true);
+        }
+      };
+
+      const renderPanel = (side) => {
+        const ctrl = side === 'LHS' ? lhsCtrl : rhsCtrl;
+        const setCtrl = side === 'LHS' ? setLhsCtrl : setRhsCtrl;
+        const isLocked = pendingOp && pendingOp.side === side;
+        if (isLocked) {
+          return (
+            <div className="bg-slate-900 border-2 border-amber-500/50 rounded-2xl p-5 flex flex-col items-center justify-center text-center gap-3 relative overflow-hidden h-[340px] shadow-lg">
+              <div className="absolute inset-0 bg-amber-500/5 pattern-diagonal-lines pattern-amber-500 pattern-bg-transparent pattern-size-4 pattern-opacity-20" />
+              <Icon name="alert-triangle" className="h-10 w-10 text-amber-500 animate-pulse relative z-10" />
+              <div className="relative z-10">
+                <h3 className="font-bold text-amber-400 text-lg uppercase tracking-wider">Awaiting Balance</h3>
+                <p className="text-sm text-slate-300 mt-2 font-mono">
+                  You applied <span className="bg-amber-900/50 px-2 py-0.5 rounded text-amber-300 font-bold">{pendingOp.op}{pendingOp.value}</span> to this wing.
+                </p>
+                <p className="text-xs text-slate-400 mt-2">Use the other controller to apply the exact same operation.</p>
+              </div>
+            </div>
+          );
+        }
+
+        return (
+          <div className={`bg-slate-900 border rounded-2xl p-5 flex flex-col h-[340px] shadow-xl transition-all duration-300 ${pendingOp ? 'border-emerald-500 ring-4 ring-emerald-500/20' : 'border-slate-800'}`}>
+            <div className="flex items-center justify-between pb-3 border-b border-slate-800 mb-4">
+              <div className="flex items-center gap-2">
+                <Icon name="gauge" className={`h-5 w-5 ${side === 'LHS' ? 'text-indigo-400' : 'text-purple-400'}`} />
+                <h2 className="text-sm font-bold text-slate-200 uppercase">{side} Controller</h2>
+              </div>
+              {pendingOp && <span className="text-xs bg-emerald-500/20 text-emerald-400 font-bold px-3 py-1 rounded-lg animate-pulse">ACTION REQUIRED</span>}
+            </div>
+            {!ctrl.op ? (
+              <div className="flex-1 flex flex-col justify-center gap-4">
+                <span className="text-xs text-slate-400 font-bold tracking-wider uppercase text-center">Step 1: Select Operation</span>
+                <div className="grid grid-cols-2 gap-3">
+                  {[
+                    { op: '+', label: 'ADD', color: 'border-emerald-500 text-emerald-400 hover:bg-emerald-500/10' },
+                    { op: '-', label: 'SUBTRACT', color: 'border-rose-500 text-rose-400 hover:bg-rose-500/10' },
+                    { op: '*', label: 'MULTIPLY', color: 'border-amber-500 text-amber-400 hover:bg-amber-500/10' },
+                    { op: '/', label: 'DIVIDE', color: 'border-sky-500 text-sky-400 hover:bg-sky-500/10' }
+                  ].map(({ op, label, color }) => (
+                    <button key={op} onClick={() => setCtrl({ op, val: '' })} className={`border border-slate-700 bg-slate-950 py-5 rounded-xl font-mono font-bold transition flex flex-col items-center gap-2 ${color}`}>
+                      <span className="text-3xl leading-none">{op === '*' ? '×' : op === '/' ? '÷' : op}</span>
+                      <span className="text-[10px] tracking-wider font-sans opacity-80">{label}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <div className="flex-1 flex flex-col animate-fade-in">
+                <div className="flex items-center gap-3 mb-3">
+                  <button onClick={() => setCtrl({ op: null, val: '' })} className="p-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-slate-400 transition">
+                    <Icon name="arrow-left" className="h-5 w-5" />
+                  </button>
+                  <div className="flex-1 flex items-center bg-slate-950 px-4 py-2.5 rounded-lg border border-slate-700 font-mono text-xl font-bold">
+                    <span className="text-indigo-400 mr-2">{ctrl.op === '*' ? '×' : ctrl.op === '/' ? '÷' : ctrl.op}</span>
+                    <span className="text-white tracking-widest">{ctrl.val || '_'}</span>
+                  </div>
+                </div>
+                <div className="grid grid-cols-4 gap-2 mb-4 flex-1">
+                  {[1, 2, 3, 4, 5, 6, 7, 8, 9, 0].map(num => (
+                    <button key={num} onClick={() => handleKeypad(side, num.toString())} className="bg-slate-950 hover:bg-slate-800 border border-slate-800 rounded-lg text-base font-semibold font-mono text-slate-300 transition active:scale-95">{num}</button>
+                  ))}
+                  <button onClick={() => handleKeypad(side, '-')} className="bg-slate-950 hover:bg-slate-800 border border-slate-800 rounded-lg text-base font-semibold font-mono text-rose-400 transition active:scale-95">-</button>
+                  <button onClick={() => handleKeypad(side, 'x')} disabled={ctrl.op === '*' || ctrl.op === '/'} className={`border rounded-lg text-base font-bold font-mono transition active:scale-95 ${ctrl.op === '*' || ctrl.op === '/' ? 'bg-slate-900 border-slate-900 text-slate-700' : 'bg-indigo-950/40 hover:bg-indigo-900/50 border-indigo-800 text-indigo-400'}`}>x</button>
+                  <button onClick={() => handleKeypad(side, 'Clear')} className="col-span-2 bg-slate-950 hover:bg-slate-800 border border-slate-800 rounded-lg text-sm font-semibold text-slate-400 transition active:scale-95">Clear</button>
+                </div>
+                <button onClick={() => handleApply(side)} className={`w-full py-3.5 rounded-xl text-sm font-bold tracking-widest uppercase transition shadow-lg ${pendingOp ? 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-900/50' : `bg-gradient-to-r ${side === 'LHS' ? 'from-indigo-600 to-indigo-800' : 'from-purple-600 to-purple-800'} hover:brightness-110 text-white`}`}>Apply to {side} Wing</button>
+              </div>
+            )}
+          </div>
+        );
+      };
+
+      if (!isRegistered) {
+        return (
+          <div className="min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center p-4 relative font-sans">
+            <form onSubmit={handleRegisterSubmit} className="max-w-md w-full bg-slate-900 border border-slate-800 rounded-3xl p-8 shadow-2xl relative z-10 flex flex-col gap-6">
+              <div className="text-center font-bold">
+                <div className="inline-flex bg-indigo-500/10 text-indigo-400 p-4 rounded-full border border-indigo-500/20 mb-4">
+                  <Icon name="rocket" className="h-10 w-10" />
+                </div>
+                <h1 className="text-2xl font-black bg-gradient-to-r from-white to-indigo-300 bg-clip-text text-transparent">COSMIC PILOT LOGIN</h1>
+              </div>
+              <div className="flex flex-col gap-4">
+                <div>
+                  <label className="text-xs font-bold text-slate-400 uppercase block mb-1.5 flex items-center gap-1.5"><Icon name="graduation-cap" /> Class / Squadron</label>
+                  <input type="text" required value={studentClass} onChange={(e) => setStudentClass(e.target.value)} placeholder="e.g. 3A, 5B" className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-slate-400 uppercase block mb-1.5 flex items-center gap-1.5"><Icon name="user" /> Class Number / Pilot ID</label>
+                  <input type="text" required value={studentClassNo} onChange={(e) => setStudentClassNo(e.target.value)} placeholder="e.g. 15" className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+                </div>
+              </div>
+              <button type="submit" className="w-full py-4 bg-gradient-to-r from-indigo-500 to-indigo-700 text-white font-bold tracking-widest uppercase rounded-2xl shadow-lg">Authenticate & Launch</button>
+            </form>
+          </div>
+        );
+      }
+
+      return (
+        <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans relative">
+          <header className="border-b border-slate-800/60 bg-slate-900/40 backdrop-blur-md px-6 py-4 flex justify-between items-center z-10 relative">
+            <div className="flex items-center gap-3">
+              <div className="bg-indigo-500/20 p-2 rounded-xl border border-indigo-500/30">
+                <Icon name="rocket" className="h-5 w-5 text-indigo-400" />
+              </div>
+              <div>
+                <h1 className="text-lg font-bold bg-gradient-to-r from-white to-indigo-300 bg-clip-text text-transparent">Cosmic Equation Balancer</h1>
+                <p className="text-[10px] text-slate-400">Class: {studentClass} | No: {studentClassNo}</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-3">
+              <select value={currentPreset.id} onChange={(e) => {
+                if (e.target.value === 'custom') setShowCustomCreator(true);
+                else { const pre = PRESETS.find(p => p.id === e.target.value); if (pre) setCurrentPreset(pre); }
+              }} className="bg-slate-900 border border-slate-700 text-sm text-slate-200 rounded-lg px-3 py-2 cursor-pointer max-w-[200px]">
+                {PRESETS.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                <option value="custom">🛠️ Custom Equation</option>
+              </select>
+              <button onClick={handleReset} className="p-2 bg-slate-800 hover:bg-slate-700 rounded-lg border border-slate-700 text-slate-300"><Icon name="rotate-ccw" className="h-5 w-5" /></button>
+            </div>
+          </header>
+
+          <main className="flex-1 flex flex-col gap-6 p-4 md:p-8 z-10 max-w-5xl w-full mx-auto relative">
+            <div className="bg-slate-900 border border-slate-800 rounded-xl px-5 py-3.5 flex items-center gap-3 shadow-sm">
+              <Icon name="info" className="h-5 w-5 text-indigo-400 shrink-0" />
+              <span className="text-base font-medium text-slate-300">{currentPreset.description}</span>
+            </div>
+
+            <div className="bg-gradient-to-b from-slate-900 to-slate-950 border border-slate-800 rounded-3xl p-6 flex flex-col shadow-inner min-h-[420px] relative overflow-hidden">
+              <div className="flex justify-between items-center mb-2">
+                <div className={`text-xs md:text-sm font-mono font-bold tracking-widest px-4 py-1.5 rounded-full ${pendingOp ? 'bg-amber-500/20 text-amber-400' : 'bg-emerald-500/20 text-emerald-400'}`}>
+                  {pendingOp ? 'WARNING: TILT DETECTED' : 'SYSTEM: BALANCED'}
+                </div>
+                <div className="text-xs md:text-sm text-slate-500 font-mono">ANGLE: {tiltAngle}°</div>
+              </div>
+
+              <div className="flex-1 flex items-center justify-center relative my-4">
+                <svg viewBox="0 0 800 450" className="w-full h-full max-h-[380px] drop-shadow-2xl overflow-visible">
+                  <line x1="50" y1="200" x2="750" y2="200" stroke="#1e293b" strokeDasharray="4 4" strokeWidth="2" />
+                  <line x1="400" y1="20" x2="400" y2="380" stroke="#1e293b" strokeDasharray="4 4" strokeWidth="2" />
+                  <circle cx="400" cy="200" r="28" fill="#0f172a" stroke="#334155" strokeWidth="4" />
+
+                  <g style={{ transform: `rotate(${tiltAngle}deg)`, transformOrigin: '400px 200px', transition: 'transform 0.5s cubic-bezier(0.34, 1.56, 0.64, 1)' }}>
+                    <path d="M 80 200 L 400 200" stroke="#334155" strokeWidth="16" strokeLinecap="round" />
+                    <path d="M 400 200 L 720 200" stroke="#334155" strokeWidth="16" strokeLinecap="round" />
+                    <path d="M 360 160 L 440 160 L 460 200 L 440 240 L 360 240 L 340 200 Z" fill="#1e293b" stroke="#6366f1" strokeWidth="4" />
+                    <path d="M 370 175 Q 400 160 430 175 L 435 200 L 365 200 Z" fill="#38bdf8" fillOpacity="0.3" stroke="#38bdf8" strokeWidth="2" />
+                    <circle cx="400" cy="215" r="10" fill="#10b981" />
+
+                    {[...lhsEngines, ...rhsEngines].map(engine => (
+                      <g key={engine.id} className="transition-all duration-500">
+                        {engine.isPositive ? (
+                          <path d={`M ${engine.cx - 10} ${engine.cy - (engine.h/2)} Q ${engine.cx} ${engine.cy - (engine.h/2) - 30} ${engine.cx + 10} ${engine.cy - (engine.h/2)} Z`} fill={engine.isVar ? 'url(#varFlame)' : 'url(#constFlame)'} className="animate-pulse" />
+                        ) : (
+                          <path d={`M ${engine.cx - 10} ${engine.cy + (engine.h/2)} Q ${engine.cx} ${engine.cy + (engine.h/2) + 30} ${engine.cx + 10} ${engine.cy + (engine.h/2)} Z`} fill={engine.isVar ? 'url(#varFlame)' : 'url(#constFlame)'} className="animate-pulse" />
+                        )}
+                        <rect x={engine.cx - 16} y={engine.isPositive ? engine.cy + (engine.h/2) : engine.cy - (engine.h/2) - 4} width="32" height="4" fill="#0f172a" rx="2" />
+                        <rect x={engine.cx - 14} y={engine.cy - (engine.h/2)} width="28" height={engine.h} rx="4" fill={engine.isVar ? '#4f46e5' : '#475569'} stroke={engine.isVar ? '#a5b4fc' : '#94a3b8'} strokeWidth="2" />
+                        <text x={engine.cx} y={engine.cy + 5} fill="#ffffff" fontSize={engine.isFractional ? "11" : "14"} fontWeight="bold" textAnchor="middle" className="font-mono select-none">
+                          {getFractionStr(engine.partSize, engine.isVar)}
+                        </text>
+                      </g>
+                    ))}
+
+                    {lhsModifier.multiplier !== 1 && (
+                      <g transform="translate(160, 140)">
+                        <rect x="-30" y="-15" width="60" height="30" rx="8" fill="#fbbf24" stroke="#d97706" strokeWidth="2" />
+                        <text x="0" y="5" fill="#000000" fontSize="14" fontWeight="bold" textAnchor="middle">× {lhsModifier.multiplier}</text>
+                      </g>
+                    )}
+                    {lhsModifier.divisor !== 1 && (
+                      <g transform="translate(160, 140)">
+                        <rect x="-30" y="-15" width="60" height="30" rx="8" fill="#38bdf8" stroke="#0284c7" strokeWidth="2" />
+                        <text x="0" y="5" fill="#000000" fontSize="14" fontWeight="bold" textAnchor="middle">÷ {lhsModifier.divisor}</text>
+                      </g>
+                    )}
+                    {rhsModifier.multiplier !== 1 && (
+                      <g transform="translate(640, 140)">
+                        <rect x="-30" y="-15" width="60" height="30" rx="8" fill="#fbbf24" stroke="#d97706" strokeWidth="2" />
+                        <text x="0" y="5" fill="#000000" fontSize="14" fontWeight="bold" textAnchor="middle">× {rhsModifier.multiplier}</text>
+                      </g>
+                    )}
+                    {rhsModifier.divisor !== 1 && (
+                      <g transform="translate(640, 140)">
+                        <rect x="-30" y="-15" width="60" height="30" rx="8" fill="#38bdf8" stroke="#0284c7" strokeWidth="2" />
+                        <text x="0" y="5" fill="#000000" fontSize="14" fontWeight="bold" textAnchor="middle">÷ {rhsModifier.divisor}</text>
+                      </g>
+                    )}
+                  </g>
+
+                  <defs>
+                    <linearGradient id="varFlame" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="#a5b4fc" /><stop offset="50%" stopColor="#4f46e5" /><stop offset="100%" stopColor="#c084fc" stopOpacity="0" />
+                    </linearGradient>
+                    <linearGradient id="constFlame" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="#fed7aa" /><stop offset="50%" stopColor="#f97316" /><stop offset="100%" stopColor="#ef4444" stopOpacity="0" />
+                    </linearGradient>
+                  </defs>
+                </svg>
+
+                {isSimplifying && (
+                  <div className="absolute inset-0 bg-indigo-500/10 backdrop-blur-sm flex items-center justify-center rounded-xl z-20">
+                    <div className="flex flex-col items-center gap-3">
+                      <div className="h-12 w-12 rounded-full border-t-4 border-r-4 border-indigo-400 animate-spin" />
+                      <span className="text-base font-bold tracking-widest text-indigo-300 font-mono">MERGING THRUSTERS...</span>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div className="border-t border-slate-800/80 pt-4">
+                <div className="flex justify-between items-center px-4">
+                  <div className="text-center w-5/12">
+                    <div className="text-xs text-slate-500 font-mono mb-1 uppercase tracking-widest">Left Wing</div>
+                    <div className={`text-2xl font-bold font-mono tracking-wide ${lhsForce > rhsForce ? 'text-amber-400' : 'text-slate-200'}`}>{formatWingString(lhsTerms, lhsModifier)}</div>
+                  </div>
+                  <div className="w-2/12 flex justify-center">
+                    <div className={`h-14 w-14 rounded-full flex items-center justify-center font-mono font-bold text-3xl border-2 ${pendingOp ? 'bg-amber-950/50 text-amber-500 border-amber-600 shadow-lg shadow-amber-500/20' : 'bg-emerald-950/50 text-emerald-400 border-emerald-500'}`}>{pendingOp ? '≠' : '='}</div>
+                  </div>
+                  <div className="text-center w-5/12">
+                    <div className="text-xs text-slate-500 font-mono mb-1 uppercase tracking-widest">Right Wing</div>
+                    <div className={`text-2xl font-bold font-mono tracking-wide ${rhsForce > lhsForce ? 'text-amber-400' : 'text-slate-200'}`}>{formatWingString(rhsTerms, rhsModifier)}</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {renderPanel('LHS')}
+              {renderPanel('RHS')}
+            </div>
+
+            <div className="flex flex-col gap-4 mt-2">
+              {errorMessage && (
+                <div className="bg-rose-950/40 border border-rose-800 text-rose-300 px-5 py-4 rounded-xl flex items-center gap-3 text-base shadow-sm">
+                  <Icon name="alert-triangle" className="h-6 w-6 shrink-0" />
+                  <span>{errorMessage}</span>
+                </div>
+              )}
+              <button onClick={handleSimplify} disabled={pendingOp !== null || isSimplifying} className={`w-full flex items-center justify-center gap-2 py-5 rounded-2xl text-lg font-black uppercase tracking-widest transition shadow-xl ${pendingOp === null && !isSimplifying ? 'bg-emerald-500 hover:bg-emerald-400 text-slate-950 shadow-emerald-500/30' : 'bg-slate-900 border border-slate-800 text-slate-600 cursor-not-allowed'}`}>
+                <Icon name="sparkles" className="h-6 w-6" /> Simplify Both Sides
+              </button>
+
+              <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 w-full flex flex-col mt-2">
+                <h3 className="text-sm font-bold text-slate-400 mb-4 uppercase tracking-wider border-b border-slate-800 pb-3">Mission Flight Log</h3>
+                <div className="overflow-y-auto max-h-[250px] flex flex-col gap-4 pr-2">
+                  {history.map((step, idx) => (
+                    <div key={idx} className="flex gap-4 items-start text-sm text-slate-300">
+                      <div className="bg-slate-800 h-6 w-6 rounded-full flex items-center justify-center text-xs font-bold text-indigo-400 shrink-0 mt-0.5">{idx + 1}</div>
+                      <div>
+                        <p className="font-semibold text-slate-400">{step.description}</p>
+                        <p className="font-mono text-indigo-300 text-base font-bold mt-1">{step.equation}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </main>
+
+          {showUnbalanceWarning && pendingOp && (
+            <div className="fixed inset-0 bg-amber-950/90 backdrop-blur-md flex items-center justify-center p-4 z-50">
+              <div className="max-w-2xl w-full bg-slate-900 border-4 border-amber-500 rounded-3xl p-8 md:p-12 text-center shadow-2xl relative overflow-hidden">
+                <Icon name="alert-triangle" className="h-24 w-24 text-amber-500 mx-auto mb-6 relative z-10" />
+                <h2 className="text-3xl md:text-4xl font-black text-white mb-4 tracking-tight relative z-10 uppercase">Spaceship Still Tilted!</h2>
+                <p className="text-lg text-amber-100 mb-8 relative z-10 font-medium leading-relaxed">
+                  You applied <span className="bg-amber-500 text-slate-950 px-2 py-1 rounded font-mono font-bold mx-1">{pendingOp.op} {pendingOp.value}</span> to the <b className="text-white">{pendingOp.side}</b> wing originally.<br/>
+                  Your last action was incorrect and did not balance the physics!
+                </p>
+                <div className="bg-amber-900/40 border border-amber-500/50 p-6 rounded-2xl mb-8 relative z-10">
+                  <h3 className="text-amber-400 font-bold uppercase tracking-widest mb-3">Required Action:</h3>
+                  <p className="text-white text-xl">Apply exactly <span className="font-mono text-amber-300 font-bold bg-amber-950/50 px-3 py-1 rounded">{pendingOp.op} {pendingOp.value}</span> to the <b className="underline decoration-amber-500">{pendingOp.side === 'LHS' ? 'RHS' : 'LHS'} Controller</b> to restore balance.</p>
+                </div>
+                <button onClick={() => setShowUnbalanceWarning(false)} className="relative z-10 w-full py-4 px-6 bg-gradient-to-r from-amber-500 to-orange-500 text-slate-950 text-xl font-black rounded-xl transition shadow-xl uppercase tracking-widest">I Understand - Let me fix it!</button>
+              </div>
+            </div>
+          )}
+
+          {isSolved && (
+            <div className="fixed inset-0 bg-emerald-950/95 backdrop-blur-md flex items-center justify-center p-4 z-50 animate-fade-in overflow-hidden">
+              <div className="absolute inset-0 z-0 pointer-events-none flex items-center justify-center opacity-65">
+                <div className="w-[180%] h-[180%] bg-[radial-gradient(circle,rgba(251,191,36,0.2)_0%,rgba(0,0,0,0)_70%)] animate-[spin_12s_linear_infinite]" style={{ backgroundImage: 'repeating-conic-gradient(from 0deg, rgba(251,191,36,0.14) 0deg 15deg, transparent 15deg 30deg)' }} />
+              </div>
+              <div className="max-w-xl w-full bg-slate-900 border-4 border-emerald-400 rounded-[36px] p-8 text-center shadow-[0_0_80px_rgba(16,185,129,0.35)] relative overflow-hidden z-10">
+                <div className="relative z-10 mb-4 animate-bounce">
+                  <span className="text-sm bg-pink-500 text-white font-extrabold px-6 py-2 rounded-full uppercase tracking-widest shadow-lg inline-block">🎉 MEGA VICTORY PARTY 🎉</span>
+                  <h2 className="text-4xl md:text-5xl font-black text-white mt-4 tracking-tight">STAR SECTOR SOLVED!</h2>
+                </div>
+                {currentPreset.id === '5' ? (
+                  <div className="my-6 p-6 bg-gradient-to-b from-indigo-950/80 via-slate-900/90 to-purple-950/60 rounded-3xl border-2 border-indigo-400/30 shadow-[inset_0_4px_30px_rgba(99,102,241,0.2)] relative overflow-hidden">
+                    <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(244,114,182,0.2),transparent)] pointer-events-none animate-pulse" />
+                    <svg viewBox="0 0 500 240" className="w-full h-56 overflow-visible relative z-10">
+                      <g className="animate-pulse">
+                        <path d="M 30 40 L 35 30 L 40 40 L 50 42 L 42 48 L 45 58 L 35 52 L 25 58 L 28 48 L 20 42 Z" fill="#fbbf24" />
+                        <path d="M 450 50 L 455 40 L 460 40 L 470 42 L 462 48 L 465 58 L 455 52 L 445 58 L 448 48 L 440 42 Z" fill="#f472b6" />
+                        <path d="M 245 20 L 249 12 L 253 20 L 261 22 L 205 27 L 257 35 L 249 30 L 241 35 L 243 27 L 237 22 Z" fill="#38bdf8" />
+                      </g>
+                      <g transform="translate(110, 140)">
+                        <g className="anim-chiikawa">
+                          <ellipse cx="-16" cy="-28" rx="10" ry="10" fill="#ffffff" />
+                          <ellipse cx="16" cy="-28" rx="10" ry="10" fill="#ffffff" />
+                          <ellipse cx="-16" cy="-28" rx="5" ry="5" fill="#fecdd3" />
+                          <ellipse cx="16" cy="-28" rx="5" ry="5" fill="#fecdd3" />
+                          <ellipse cx="0" cy="0" rx="36" ry="32" fill="#ffffff" stroke="#cbd5e1" strokeWidth="2.5" />
+                          <ellipse cx="-20" cy="4" rx="7" ry="5" fill="#f472b6" opacity="0.65" />
+                          <ellipse cx="20" cy="4" rx="7" ry="5" fill="#f472b6" opacity="0.65" />
+                          <circle cx="-11" cy="-6" r="4" fill="#20293a" />
+                          <circle cx="11" cy="-6" r="4" fill="#20293a" />
+                          <circle cx="-12.5" cy="-8.5" r="1.2" fill="#ffffff" />
+                          <circle cx="9.5" cy="-8.5" r="1.2" fill="#ffffff" />
+                          <path d="M -16 -16 Q -12 -14 -9 -15" fill="none" stroke="#475569" strokeWidth="1.5" />
+                          <path d="M 16 -16 Q 12 -14 9 -15" fill="none" stroke="#475569" strokeWidth="1.5" />
+                          <path d="M -3 3 Q 0 6 3 3" fill="none" stroke="#20293a" strokeWidth="2" />
+                          <circle cx="-28" cy="14" r="6" fill="#ffffff" stroke="#cbd5e1" strokeWidth="2" />
+                          <circle cx="28" cy="14" r="6" fill="#ffffff" stroke="#cbd5e1" strokeWidth="2" />
+                          <ellipse cx="-15" cy="30" rx="9" ry="5" fill="#ffffff" stroke="#cbd5e1" strokeWidth="2" />
+                          <ellipse cx="15" cy="30" rx="9" ry="5" fill="#ffffff" stroke="#cbd5e1" strokeWidth="2" />
+                          <text x="0" y="-48" fill="#f43f5e" fontSize="12" fontWeight="950" textAnchor="middle" className="font-sans">Yatta! (ヤッタ!)</text>
+                        </g>
+                      </g>
+                      <g transform="translate(250, 125)">
+                        <g className="anim-usagi">
+                          <ellipse cx="-12" cy="-45" rx="8" ry="24" fill="#fef08a" stroke="#ca8a04" strokeWidth="2.5" />
+                          <ellipse cx="12" cy="-45" rx="8" ry="24" fill="#fef08a" stroke="#ca8a04" strokeWidth="2.5" />
+                          <ellipse cx="-12" cy="-42" rx="4" ry="18" fill="#fda4af" />
+                          <ellipse cx="12" cy="-42" rx="4" ry="18" fill="#fda4af" />
+                          <ellipse cx="0" cy="0" rx="35" ry="32" fill="#fef08a" stroke="#ca8a04" strokeWidth="2.5" />
+                          <ellipse cx="-18" cy="4" rx="7" ry="4" fill="#f472b6" opacity="0.65" />
+                          <ellipse cx="18" cy="4" rx="7" ry="4" fill="#f472b6" opacity="0.65" />
+                          <circle cx="-10" cy="-6" r="4.5" fill="#20293a" />
+                          <circle cx="10" cy="-6" r="4.5" fill="#20293a" />
+                          <circle cx="-11.5" cy="-8" r="1.5" fill="#ffffff" />
+                          <circle cx="8.5" cy="-8" r="1.5" fill="#ffffff" />
+                          <path d="M -6 4 Q 0 12 6 4 Z" fill="#f43f5e" stroke="#20293a" strokeWidth="2" />
+                          <circle cx="-28" cy="-14" r="7" fill="#fef08a" stroke="#ca8a04" strokeWidth="2" />
+                          <circle cx="28" cy="-14" r="7" fill="#fef08a" stroke="#ca8a04" strokeWidth="2" />
+                          <ellipse cx="-14" cy="30" rx="9" ry="5" fill="#fef08a" stroke="#ca8a04" strokeWidth="2" />
+                          <ellipse cx="15" cy="30" rx="9" ry="5" fill="#fef08a" stroke="#ca8a04" strokeWidth="2" />
+                          <text x="0" y="-76" fill="#eab308" fontSize="12" fontWeight="950" textAnchor="middle" className="font-sans">Ura! (ウラッ!)</text>
+                        </g>
+                      </g>
+                      <g transform="translate(390, 140)">
+                        <g className="anim-hachiware">
+                          <path d="M -26 -26 L -12 -42 L -6 -24 Z" fill="#38bdf8" stroke="#0284c7" strokeWidth="2" />
+                          <path d="M 26 -26 L 12 -42 L 6 -24 Z" fill="#38bdf8" stroke="#0284c7" strokeWidth="2" />
+                          <path d="M -22 -28 L -14 -38 L -10 -26 Z" fill="#fecdd3" />
+                          <path d="M 22 -28 L 14 -38 L 10 -26 Z" fill="#fecdd3" />
+                          <ellipse cx="0" cy="0" rx="36" ry="32" fill="#ffffff" stroke="#cbd5e1" strokeWidth="2.5" />
+                          <path d="M -34 -10 C -34 -30 -16 -32 0 -21 C 16 -32 34 -30 34 -10 C 34 -14 24 -24 0 -13 C -24 -24 -34 -14 -34 -10 Z" fill="#38bdf8" />
+                          <ellipse cx="-18" cy="4" rx="6" ry="4" fill="#f472b6" opacity="0.65" />
+                          <ellipse cx="18" cy="4" rx="6" ry="4" fill="#f472b6" opacity="0.65" />
+                          <circle cx="-10" cy="-6" r="4" fill="#20293a" />
+                          <circle cx="10" cy="-6" r="4" fill="#20293a" />
+                          <circle cx="-11.5" cy="-8" r="1.2" fill="#ffffff" />
+                          <circle cx="8.5" cy="-8" r="1.2" fill="#ffffff" />
+                          <path d="M -4 3 Q -2 6 0 3 Q 2 6 4 3" fill="none" stroke="#20293a" strokeWidth="2.5" strokeLinecap="round" />
+                          <circle cx="-28" cy="12" r="7" fill="#ffffff" stroke="#cbd5e1" strokeWidth="2" />
+                          <circle cx="28" cy="12" r="7" fill="#ffffff" stroke="#cbd5e1" strokeWidth="2" />
+                          <ellipse cx="-15" cy="30" rx="9" ry="5" fill="#ffffff" stroke="#cbd5e1" strokeWidth="2" />
+                          <ellipse cx="15" cy="30" rx="9" ry="5" fill="#ffffff" stroke="#cbd5e1" strokeWidth="2" />
+                          <text x="0" y="-48" fill="#0284c7" fontSize="11" fontWeight="950" textAnchor="middle" className="font-sans">Uya! (ウヤ!)</text>
+                        </g>
+                      </g>
+                    </svg>
+                    <h3 className="text-2xl font-black text-pink-300 animate-pulse mt-4">✨ MASTER SECTOR UNLOCKED! ✨</h3>
+                    <p className="text-sm text-indigo-100 mt-2 font-semibold">Your coordinates have been parsed and synced to our spreadsheet logs.</p>
+                  </div>
+                ) : (
+                  <div className="my-8 flex justify-center"><Icon name="check-circle2" className="h-24 w-24 text-emerald-400 animate-bounce" /></div>
+                )}
+                <div className="bg-slate-950 border border-emerald-900/60 p-6 rounded-2xl my-6">
+                  <span className="text-sm text-slate-500 font-bold uppercase block mb-2">FINAL SOLVED EQUATION:</span>
+                  <span className="text-4xl font-mono font-bold text-emerald-400 drop-shadow-[0_0_10px_rgba(16,185,129,0.4)]">{formatEquationString(lhsTerms, lhsModifier, rhsTerms, rhsModifier)}</span>
+                </div>
+                <button onClick={() => {
+                  const nextIdx = (PRESETS.findIndex(p => p.id === currentPreset.id) + 1) % PRESETS.length;
+                  setCurrentPreset(PRESETS[nextIdx]);
+                }} className="w-full py-5 bg-gradient-to-r from-emerald-500 to-teal-400 text-slate-950 font-black uppercase tracking-wider rounded-2xl text-xl shadow-lg transition active:scale-95">
+                  {currentPreset.id === '5' ? 'Loop Mission Sector' : 'Next Sector'}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {showCustomCreator && (
+            <div className="fixed inset-0 bg-slate-950/85 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+              <div className="max-w-md w-full bg-slate-900 border border-slate-800 rounded-3xl p-6">
+                <div className="flex justify-between items-center mb-4 pb-2 border-b border-slate-800">
+                  <h3 className="text-lg font-bold">Custom Coordinates</h3>
+                  <button onClick={() => setShowCustomCreator(false)}><Icon name="x" /></button>
+                </div>
+                <div className="space-y-4">
+                  <div>
+                    <label className="text-xs text-slate-400 block mb-1">Left Wing (LHS):</label>
+                    <input type="text" value={customLhsInput} onChange={e => setCustomLhsInput(e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2 font-mono text-slate-200" />
+                  </div>
+                  <div className="text-center font-mono font-bold text-slate-500">=</div>
+                  <div>
+                    <label className="text-xs text-slate-400 block mb-1">Right Wing (RHS):</label>
+                    <input type="text" value={customRhsInput} onChange={e => setCustomRhsInput(e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2 font-mono text-slate-200" />
+                  </div>
+                  <button onClick={() => {
+                    const parseSideInput = (inputStr) => {
+                      const tokens = inputStr.trim().toLowerCase().replace(/\s+/g, '').match(/[+-]?\d*(?:\.\d+)?x?/g) || [];
+                      const terms = [];
+                      for (let token of tokens) {
+                        if (!token) continue;
+                        const parsed = parseTerm(token);
+                        if (parsed) terms.push(parsed);
+                        else return null;
+                      }
+                      return terms.length > 0 ? terms : null;
+                    };
+                    const pLhs = parseSideInput(customLhsInput); 
+                    const pRhs = parseSideInput(customRhsInput);
+                    if(!pLhs || !pRhs) return setErrorMessage("Invalid format");
+                    setCurrentPreset({ id: 'custom', name: 'Custom Vector', lhs: pLhs, rhs: pRhs, description: 'User defined.' });
+                    setShowCustomCreator(false);
+                  }} className="w-full py-3 bg-indigo-600 text-white font-bold rounded-xl mt-4">Launch Custom Mission</button>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    const container = document.getElementById('root');
+    const root = ReactDOM.createRoot(container);
+    root.render(<App />);
+  </script>
+</body>
+</html>
